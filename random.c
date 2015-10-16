@@ -18,12 +18,18 @@
 
 /* $Id$ */
 
+#ifdef HAVE_CONFIG_H
+# include "config.h"
+#endif
+
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <math.h>
+#include <limits.h>
 
 #include "php.h"
+#include "ext/standard/info.h"
 #include "zend_exceptions.h"
 #include "php_random.h"
 
@@ -84,7 +90,7 @@ static int php_random_bytes(void *bytes, size_t size)
 #if PHP_WIN32
 	/* Defer to CryptGenRandom on Windows */
 	if (php_win32_get_random_bytes(bytes, size) == FAILURE) {
-		zend_throw_exception(zend_ce_exception, "Could not gather sufficient random data", 0);
+		zend_throw_exception(zend_exception_get_default(TSRMLS_C), "Could not gather sufficient random data", 0);
 		return FAILURE;
 	}
 #elif HAVE_DECL_ARC4RANDOM_BUF
@@ -119,7 +125,7 @@ static int php_random_bytes(void *bytes, size_t size)
 				php_random_bytes should be terminated by the exception instead
 				of proceeding to demand more entropy.
 			*/
-			zend_throw_exception(zend_ce_exception, "Could not gather sufficient random data", errno);
+			zend_throw_exception(zend_exception_get_default(TSRMLS_C), "Could not gather sufficient random data", errno);
 			return FAILURE;
 		}
 
@@ -136,7 +142,7 @@ static int php_random_bytes(void *bytes, size_t size)
 		fd = open("/dev/urandom", O_RDONLY);
 #endif
 		if (fd < 0) {
-			zend_throw_exception(zend_ce_exception, "Cannot open source device", 0);
+			zend_throw_exception(zend_exception_get_default(TSRMLS_C), "Cannot open source device", 0);
 			return FAILURE;
 		}
 		/* Does the file exist and is it a character device? */
@@ -148,7 +154,7 @@ static int php_random_bytes(void *bytes, size_t size)
 # endif
 		) {
 			close(fd);
-			zend_throw_exception(zend_ce_exception, "Error reading from source device", 0);
+			zend_throw_exception(zend_exception_get_default(TSRMLS_C), "Error reading from source device", 0);
 			return FAILURE;
 		}
 		RANDOM_G(fd) = fd;
@@ -163,7 +169,7 @@ static int php_random_bytes(void *bytes, size_t size)
 	}
 
 	if (read_bytes < size) {
-		zend_throw_exception(zend_ce_exception, "Could not gather sufficient random data", 0);
+		zend_throw_exception(zend_exception_get_default(TSRMLS_C), "Could not gather sufficient random data", 0);
 		return FAILURE;
 	}
 #endif
@@ -176,28 +182,28 @@ static int php_random_bytes(void *bytes, size_t size)
 Return an arbitrary length of pseudo-random bytes as binary string */
 PHP_FUNCTION(random_bytes)
 {
-	zend_long size;
-	zend_string *bytes;
+	long size;
+	char *bytes;
 
-	if (zend_parse_parameters_throw(ZEND_NUM_ARGS(), "l", &size) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "l", &size) == FAILURE) {
 		return;
 	}
 
 	if (size < 1) {
-		zend_throw_exception(zend_ce_error, "Length must be greater than 0", 0);
+		zend_throw_exception(zend_get_error_exception(TSRMLS_C), "Length must be greater than 0", 0);
 		return;
 	}
 
-	bytes = zend_string_alloc(size, 0);
+	bytes = emalloc(size + 1);
 
-	if (php_random_bytes(ZSTR_VAL(bytes), size) == FAILURE) {
-		zend_string_release(bytes);
+	if (php_random_bytes(bytes, size) == FAILURE) {
+		efree(bytes);
 		return;
 	}
 
-	ZSTR_VAL(bytes)[size] = '\0';
+	bytes[size] = '\0';
 
-	RETURN_STR(bytes);
+	RETURN_STRINGL(bytes, size, 0);
 }
 /* }}} */
 
@@ -205,17 +211,17 @@ PHP_FUNCTION(random_bytes)
 Return an arbitrary pseudo-random integer */
 PHP_FUNCTION(random_int)
 {
-	zend_long min;
-	zend_long max;
-	zend_ulong umax;
-	zend_ulong result;
+	long min;
+	long max;
+	unsigned long umax;
+	unsigned long result;
 
-	if (zend_parse_parameters_throw(ZEND_NUM_ARGS(), "ll", &min, &max) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "ll", &min, &max) == FAILURE) {
 		return;
 	}
 
 	if (min > max) {
-		zend_throw_exception(zend_ce_error, "Minimum value must be less than or equal to the maximum value", 0);
+		zend_throw_exception(zend_get_error_exception(TSRMLS_C), "Minimum value must be less than or equal to the maximum value", 0);
 		return;
 	}
 
@@ -230,8 +236,8 @@ PHP_FUNCTION(random_int)
 	}
 
 	/* Special case where no modulus is required */
-	if (umax == ZEND_ULONG_MAX) {
-		RETURN_LONG((zend_long)result);
+	if (umax == ULONG_MAX) {
+		RETURN_LONG((long)result);
 	}
 
 	/* Increment the max so the range is inclusive of max */
@@ -240,7 +246,7 @@ PHP_FUNCTION(random_int)
 	/* Powers of two are not biased */
 	if ((umax & (umax - 1)) != 0) {
 		/* Ceiling under which ZEND_LONG_MAX % max == 0 */
-		zend_ulong limit = ZEND_ULONG_MAX - (ZEND_ULONG_MAX % umax) - 1;
+		unsigned long limit = ULONG_MAX - (ULONG_MAX % umax) - 1;
 
 		/* Discard numbers over the limit to avoid modulo bias */
 		while (result > limit) {
@@ -250,8 +256,48 @@ PHP_FUNCTION(random_int)
 		}
 	}
 
-	RETURN_LONG((zend_long)((result % umax) + min));
+	RETURN_LONG((long)((result % umax) + min));
 }
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_random_bytes, 0, 0, 0)
+	ZEND_ARG_INFO(0, length)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_random_int, 0, 0, 0)
+	ZEND_ARG_INFO(0, min)
+	ZEND_ARG_INFO(0, max)
+ZEND_END_ARG_INFO()
+
+const zend_function_entry random_functions[] = {
+	PHP_FE(random_bytes, arginfo_random_bytes)
+	PHP_FE(random_int, arginfo_random_int)
+	PHP_FE_END
+};
+
+PHP_MINFO_FUNCTION(random)
+{
+	php_info_print_table_start();
+	php_info_print_table_row(2, "PHP 7 CSPRNG functions", "enabled");
+	php_info_print_table_end();
+}
+
+zend_module_entry random_module_entry = {
+	STANDARD_MODULE_HEADER,
+	"random",
+	random_functions,
+	PHP_MINIT(random),
+	PHP_MSHUTDOWN(random),
+	NULL,
+	NULL,
+	PHP_MINFO(random),
+	NO_VERSION_YET,
+	STANDARD_MODULE_PROPERTIES
+};
+
+#ifdef COMPILE_DL_RANDOM
+ZEND_GET_MODULE(random)
+#endif
+
 /*
  * Local variables:
  * tab-width: 4

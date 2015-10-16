@@ -8,9 +8,9 @@ dnl Check for getrandom on newer Linux kernels
 dnl
 AC_CHECK_DECLS([getrandom])
 
-PHP_ARG_ENABLE(csprng, Whether to enable the "csprng" extension,
-	[  --enable-csprng         Enable "php-csprng" extension support])
+PHP_ARG_ENABLE(random, Whether to enable the "random" extension,
+	[  --enable-random           Enable "php-random" extension support])
 
-if test $PHP_CSPRNG != "no"; then
-	PHP_NEW_EXTENSION(csprng, random.c, $ext_shared)
+if test $PHP_RANDOM != "no"; then
+	PHP_NEW_EXTENSION(random, random.c, $ext_shared)
 fi
